@@ -1,32 +1,25 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const http = require('http');
-const qrcode = require('qrcode'); // سنستخدم مكتبة qrcode لتحويل الرمز لصورة ويب (أو سنعرضه كنص)
 
-let latestQR = '';
+let pairingCodeDisplay = '';
 
-// 1. فتح سيرفر ويب يعرض QR Code أو حالة البوت للمستخدم عبر المتصفح
+// 1. سيرفر ويب بسيط لعرض حالة البوت أو رمز الربط على المتصفح
 const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    if (latestQR) {
-        try {
-            // توليد صورة QR كـ Data URL لعرضها بشكل جميل جداً على هاتف المحمول
-            const qrImage = await qrcode.toDataURL(latestQR);
-            res.end(`
-                <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
-                    <h2>امسح الرمز أدناه لربط بوت الواتساب:</h2>
-                    <img src="${qrImage}" alt="WhatsApp QR Code" style="width:300px;height:300px;"/>
-                    <p>قم بتحديث الصفحة إذا لم يظهر الرمز بوضوح.</p>
-                </div>
-            `);
-        } catch (err) {
-            res.end(`<h2>حدث خطأ أثناء توليد الرمز، يرجى إعادة التشغيل.</h2>`);
-        }
+    if (pairingCodeDisplay) {
+        res.end(`
+            <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
+                <h2>رمز ربط بوت الواتساب الخاص بك:</h2>
+                <h1 style="font-size: 50px; color: #25D366; background: #f0f0f0; padding: 20px; display: inline-block; border-radius: 10px;">${pairingCodeDisplay}</h1>
+                <p>ادخل إلى واتساب -> الأجهزة المرتبطة -> ربط جهاز -> ربط برقم الهاتف واكتب هذا الرمز.</p>
+            </div>
+        `);
     } else {
         res.end(`
             <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
                 <h2>البوت يعمل أو تم الاتصال بنجاح!</h2>
-                <p>إذا لم يتم الربط، انتظر قليلاً أو قم بإعادة تشغيل الخدمة.</p>
+                <p>إذا لم يظهر الرمز بعد، انتظر ثوانٍ واعمل تحديث للصفحة.</p>
             </div>
         `);
     }
@@ -45,20 +38,35 @@ async function startBot() {
     
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        printQRInTerminal: false,
+        // جعل البوت يظهر كمتصفح سطح مكتب لضمان استقرار الاتصال
+        browser: Browsers.macOS('Desktop'),
         logger: pino({ level: 'silent' })
     });
+
+    // طلب رمز الربط برقم الهاتف إذا لم يكن الحساب مسجلاً مسبقاً
+    if (!sock.authState.creds.registered) {
+        // ضع رقم هاتفك هنا مع رمز الدولة (مثال: 249XXXXXXXXX)
+        const phoneNumber = "249114662437"; 
+        
+        setTimeout(async () => {
+            try {
+                let code = await sock.requestPairingCode(phoneNumber);
+                code = code?.match(/.{1,4}/g)?.join("-") || code;
+                pairingCodeDisplay = code;
+                console.log(`\n========================================`);
+                console.log(`🔐 رمز الربط الخاص بك هو: ${code}`);
+                console.log(`========================================\n`);
+            } catch (error) {
+                console.error("فشل في طلب رمز الربط:", error);
+            }
+        }, 3000);
+    }
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        // التقاط الرمز وتخزينه ليعرض في صفحة الويب
-        if (qr) {
-            latestQR = qr;
-            console.log('تم توليد QR Code جديد، افتح رابط المشروع لرؤيته!');
-        }
+        const { connection, lastDisconnect } = update;
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -67,7 +75,7 @@ async function startBot() {
                 startBot();
             }
         } else if (connection === 'open') {
-            latestQR = ''; // مسح الرمز بعد الاتصال الناجح
+            pairingCodeDisplay = ''; // مسح الرمز بعد الاتصال الناجح
             console.log('تم تسجيل الدخول بنجاح والبوت يعمل الآن!');
         }
     });
