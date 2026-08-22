@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-deleted-bot",
+  "version": "1.0.0",
+  "description": "Bot to detect deleted whatsapp messages",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "latest",
+    "pino": "latest"
+  }
+}
