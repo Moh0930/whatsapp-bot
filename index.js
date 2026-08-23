@@ -3,7 +3,7 @@ const pino = require('pino');
 const http = require('http');
 const https = require('https');
 
-// 1. سيرفر ويب بسيط لضمان بقاء التطبيق نشيطاً على Railway
+// 1. سيرفر ويب بسيط للبقاء نشيطاً على Railway
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(`
@@ -19,7 +19,7 @@ server.listen(PORT, () => {
     console.log(`Server is listening on port ${PORT}`);
 });
 
-// 2. دالة إرسال التنبيه عبر الـ API الذي نجح معك
+// 2. دالة إرسال التنبيه عبر الـ API
 function sendCallMeBotAlert(messageText) {
     const phone = "249114662437";
     const apiKey = "5816385";
@@ -37,16 +37,16 @@ function sendCallMeBotAlert(messageText) {
     });
 }
 
-// 3. تشغيل بوت مراقبة واتساب (Baileys)
+// 3. تشغيل بوت مراقبة واتساب
 const messageStore = new Map();
 
 async function startBot() {
-    // استخدمنا مجلد جلسة جديد ونظيف
-    const { state, saveCreds } = await useMultiFileAuthState('session_final_api');
+    // استخدمنا مجلد جلسة جديد كلياً لتجنب أي بيانات قديمة
+    const { state, saveCreds } = await useMultiFileAuthState('session_new_railway');
     
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true, // سيظهر الـ QR في السجلات (Logs) لمن يحتاجه، أو نعتمد على كود الربط
+        printQRInTerminal: false,
         browser: Browsers.macOS('Chrome'),
         logger: pino({ level: 'silent' })
     });
@@ -56,23 +56,27 @@ async function startBot() {
     let codeRequested = false;
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, lastDisconnect } = update;
 
-        // طلب كود الرقم تلقائياً بكل سهولة
         if (!sock.authState.creds.registered && !codeRequested) {
             codeRequested = true;
             const phoneNumber = "249114662437"; 
             
-            await new Promise(resolve => setTimeout(resolve, 6000));
+            console.log('⏳ جاري الانتظار 30 ثانية لثبات الاتصال تماماً وتجنب الحظر...');
+            // انتظار 30 ثانية كاملة لضمان استقرار السيرفر الجديد
+            await new Promise(resolve => setTimeout(resolve, 30000));
+            
             try {
+                console.log('🔄 جاري طلب رمز الربط الآن...');
                 let code = await sock.requestPairingCode(phoneNumber);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
+                
                 console.log(`\n========================================`);
-                console.log(`🔐 رمز الربط الخاص بك هو: ${code}`);
+                console.log(`🔐 رمز الربط الجديد الخاص بك هو: ${code}`);
                 console.log(`========================================\n`);
             } catch (error) {
                 console.error("فشل في طلب رمز الربط:", error);
-                codeRequested = false;
+                codeRequested = false; // السماح بإعادة المحاولة إذا فشل
             }
         }
 
@@ -104,7 +108,7 @@ async function startBot() {
         }
     });
 
-    // رصد الرسائل المحذوفة وإرسالها عبر CallMeBot فوراً
+    // رصد الرسائل المحذوفة وإرسالها عبر CallMeBot
     sock.ev.on('message.delete', async (item) => {
         const deletedId = item.keys[0].id;
         const cachedMsg = messageStore.get(deletedId);
@@ -112,7 +116,6 @@ async function startBot() {
         if (cachedMsg) {
             const alertText = `⚠️ تنبيه حذف رسالة!\nمن: ${cachedMsg.sender}\nالنص المحذوف: ${cachedMsg.text}`;
             console.log(alertText);
-            // إرسال التنبيه فوراً عبر الـ API
             sendCallMeBotAlert(alertText);
         }
     });
