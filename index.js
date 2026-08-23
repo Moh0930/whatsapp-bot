@@ -2,8 +2,8 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers
 const pino = require('pino');
 
 async function startBot() {
-    // استخدام مجلد جديد كلياً
-    const { state, saveCreds } = await useMultiFileAuthState('session_logs_v6');
+    // استخدمنا مجلد جديد لضمان نظافة الجلسة
+    const { state, saveCreds } = await useMultiFileAuthState('session_pairing_final');
     
     const sock = makeWASocket({
         auth: state,
@@ -14,30 +14,37 @@ async function startBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+    let codeRequested = false;
 
-        // الانتظار حتى يستقر الاتصال تماماً قبل طلب الرمز لتجنب توقف السيرفر
-        if ((qr || connection === 'connecting') && !sock.authState.creds.registered) {
-            const phoneNumber = "249114662437"; 
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+
+        // طلب الكود فقط إذا لم يكن الجهاز مسجلاً مسبقاً ولم يتم طلب الكود بعد
+        if (!sock.authState.creds.registered && !codeRequested) {
+            codeRequested = true;
+            const phoneNumber = "249114662437"; // رقمك بدون علامة +
+            
+            console.log('⏳ جاري الاتصال بسيرفرات واتساب لتحضير كود الرقم...');
+            
+            // ننتظر 6 ثوانٍ لضمان ثبات الاتصال تماماً قبل طلب الكود من واتساب
+            await new Promise(resolve => setTimeout(resolve, 6000));
             
             try {
-                // زيادة وقت الانتظار إلى 8 ثوانٍ لضمان ثبات الاتصال بسيرفرات واتساب
-                await new Promise(resolve => setTimeout(resolve, 8000));
-                
                 let code = await sock.requestPairingCode(phoneNumber);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 
                 console.log(`\n========================================`);
-                console.log(`🔐 رمز الربط الجديد هو: ${code}`);
+                console.log(`🔐 رمز الربط الخاص بك هو: ${code}`);
                 console.log(`========================================\n`);
             } catch (error) {
-                console.error("خطأ في طلب الرمز:", error);
+                console.error("فشل في طلب رمز الربط، يرجى إعادة المحاولة:", error);
+                codeRequested = false; // السماح بإعادة المحاولة إذا فشل
             }
         }
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('انقطع الاتصال، جاري إعادة المحاولة...');
             if (shouldReconnect) {
                 setTimeout(startBot, 5000);
             }
@@ -46,6 +53,7 @@ async function startBot() {
         }
     });
 
+    // كشف حذف الرسائل وإرسال التنبيه
     const messageStore = new Map();
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
