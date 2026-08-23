@@ -1,76 +1,42 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
-const pino = require('pino');
+const http = require('http');
+const https = require('https');
 
-async function startBot() {
-    // استخدمنا مجلد جديد لضمان نظافة الجلسة
-    const { state, saveCreds } = await useMultiFileAuthState('session_pairing_final');
+// سيرفر ويب بسيط للبقاء نشيطاً على Railway
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`
+        <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
+            <h2 style="color: #25D366;">البوت يعمل بنجاح عبر CallMeBot API!</h2>
+            <p>متصل وجاهز لإرسال تنبيهات حذف الرسائل.</p>
+        </div>
+    `);
+});
+
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+    console.log(`Server is listening on port ${PORT}`);
+});
+
+// دالة إرسال التنبيه عبر CallMeBot API
+function sendWhatsAppAlert(messageText) {
+    const phone = "249114662437";
+    const apiKey = "5816385";
+    const encodedMessage = encodeURIComponent(messageText);
     
-    const sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: false,
-        browser: Browsers.macOS('Chrome'),
-        logger: pino({ level: 'silent' })
-    });
+    const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodedMessage}&apikey=${apiKey}`;
 
-    sock.ev.on('creds.update', saveCreds);
-
-    let codeRequested = false;
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
-
-        // طلب الكود فقط إذا لم يكن الجهاز مسجلاً مسبقاً ولم يتم طلب الكود بعد
-        if (!sock.authState.creds.registered && !codeRequested) {
-            codeRequested = true;
-            const phoneNumber = "249114662437"; // رقمك بدون علامة +
-            
-            console.log('⏳ جاري الاتصال بسيرفرات واتساب لتحضير كود الرقم...');
-            
-            // ننتظر 6 ثوانٍ لضمان ثبات الاتصال تماماً قبل طلب الكود من واتساب
-            await new Promise(resolve => setTimeout(resolve, 6000));
-            
-            try {
-                let code = await sock.requestPairingCode(phoneNumber);
-                code = code?.match(/.{1,4}/g)?.join("-") || code;
-                
-                console.log(`\n========================================`);
-                console.log(`🔐 رمز الربط الخاص بك هو: ${code}`);
-                console.log(`========================================\n`);
-            } catch (error) {
-                console.error("فشل في طلب رمز الربط، يرجى إعادة المحاولة:", error);
-                codeRequested = false; // السماح بإعادة المحاولة إذا فشل
-            }
-        }
-
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('انقطع الاتصال، جاري إعادة المحاولة...');
-            if (shouldReconnect) {
-                setTimeout(startBot, 5000);
-            }
-        } else if (connection === 'open') {
-            console.log('🎉 تم تسجيل الدخول بنجاح والبوت يعمل الآن!');
-        }
-    });
-
-    // كشف حذف الرسائل وإرسال التنبيه
-    const messageStore = new Map();
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message) return;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-        if (text) {
-            messageStore.set(msg.key.id, { chatJid: msg.key.remoteJid, sender: msg.key.participant || msg.key.remoteJid, text });
-        }
-    });
-
-    sock.ev.on('message.delete', async (item) => {
-        const cachedMsg = messageStore.get(item.keys[0].id);
-        if (cachedMsg) {
-            const alertText = `⚠️ *تنبيه حذف رسالة!*\n👤 *من:* ${cachedMsg.sender}\n💬 *النص المحذوف:* ${cachedMsg.text}`;
-            await sock.sendMessage('249114662437@s.whatsapp.net', { text: alertText });
-        }
+    https.get(url, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+            console.log('تم إرسال التنبيه بنجاح عبر CallMeBot:', data);
+        });
+    }).on("error", (err) => {
+        console.error("خطأ في إرسال التنبيه:", err.message);
     });
 }
 
-startBot();
+// تجربة إرسال رسالة عند تشغيل البوت لأول مرة للتأكد من أن كل شيء يعمل
+setTimeout(() => {
+    sendWhatsAppAlert("🚀 تم تشغيل بوت تنبيهات حذف الرسائل بنجاح!");
+}, 5000);
