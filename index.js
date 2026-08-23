@@ -2,7 +2,8 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers
 const pino = require('pino');
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('session_logs_v5');
+    // استخدام مجلد جديد كلياً
+    const { state, saveCreds } = await useMultiFileAuthState('session_logs_v6');
     
     const sock = makeWASocket({
         auth: state,
@@ -16,16 +17,19 @@ async function startBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
+        // الانتظار حتى يستقر الاتصال تماماً قبل طلب الرمز لتجنب توقف السيرفر
         if ((qr || connection === 'connecting') && !sock.authState.creds.registered) {
-            const phoneNumber = "249114662437"; // رقمك بدون علامة +
+            const phoneNumber = "249114662437"; 
             
             try {
-                await new Promise(resolve => setTimeout(resolve, 4000));
+                // زيادة وقت الانتظار إلى 8 ثوانٍ لضمان ثبات الاتصال بسيرفرات واتساب
+                await new Promise(resolve => setTimeout(resolve, 8000));
+                
                 let code = await sock.requestPairingCode(phoneNumber);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 
                 console.log(`\n========================================`);
-                console.log(`🔐 رمز الربط الخاص بك هو: ${code}`);
+                console.log(`🔐 رمز الربط الجديد هو: ${code}`);
                 console.log(`========================================\n`);
             } catch (error) {
                 console.error("خطأ في طلب الرمز:", error);
@@ -35,14 +39,13 @@ async function startBot() {
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) {
-                setTimeout(startBot, 3000);
+                setTimeout(startBot, 5000);
             }
         } else if (connection === 'open') {
             console.log('🎉 تم تسجيل الدخول بنجاح والبوت يعمل الآن!');
         }
     });
 
-    // كشف حذف الرسائل وإرسال التنبيه
     const messageStore = new Map();
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
