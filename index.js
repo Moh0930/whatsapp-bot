@@ -2,7 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers
 const pino = require('pino');
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('session_logs_v4');
+    const { state, saveCreds } = await useMultiFileAuthState('session_logs_v5');
     
     const sock = makeWASocket({
         auth: state,
