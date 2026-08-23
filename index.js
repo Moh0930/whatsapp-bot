@@ -3,23 +3,24 @@ const pino = require('pino');
 const http = require('http');
 
 let pairingCodeDisplay = '';
+let connectionStatus = 'جاري الاتصال وتحضير البوت...';
 
-// 1. سيرفر ويب بسيط لعرض حالة البوت أو رمز الربط على المتصفح
+// سيرفر ويب لعرض الكود المكون من 8 أرقام بخط كبير جداً على المتصفح
 const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     if (pairingCodeDisplay) {
         res.end(`
-            <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
+            <div style="text-align:center; margin-top:40px; font-family:sans-serif;">
                 <h2>رمز ربط بوت الواتساب الخاص بك:</h2>
-                <h1 style="font-size: 50px; color: #25D366; background: #f0f0f0; padding: 20px; display: inline-block; border-radius: 10px;">${pairingCodeDisplay}</h1>
-                <p>ادخل إلى واتساب -> الأجهزة المرتبطة -> ربط جهاز -> ربط برقم الهاتف واكتب هذا الرمز.</p>
+                <h1 style="font-size: 50px; color: #25D366; background: #f0f0f0; padding: 20px; display: inline-block; border-radius: 10px; letter-spacing: 4px;">${pairingCodeDisplay}</h1>
+                <p style="font-size: 18px; color: #333; margin-top: 15px;">انسخ هذه الأواصر واكتبها في خانة "ربط برقم الهاتف" في تطبيق الواتساب.</p>
             </div>
         `);
     } else {
         res.end(`
             <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
-                <h2>البوت يعمل أو تم الاتصال بنجاح!</h2>
-                <p>إذا لم يظهر الرمز بعد، انتظر ثوانٍ واعمل تحديث للصفحة.</p>
+                <h2>حالة البوت: ${connectionStatus}</h2>
+                <p>انتظر ثوانٍ معدودة، ثم قم بتحديث الصفحة (Refresh) ليظهر الرمز.</p>
             </div>
         `);
     }
@@ -30,38 +31,18 @@ server.listen(PORT, () => {
     console.log(`Server is listening on port ${PORT}`);
 });
 
-// تخزين مؤقت للرسائل الواردة
 const messageStore = new Map();
 
 async function startBot() {
+    // احرص على حذف مجلد auth_info القديم أولاً قبل تشغيل هذا الكود
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     
     const sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-        // جعل البوت يظهر كمتصفح سطح مكتب لضمان استقرار الاتصال
         browser: Browsers.macOS('Desktop'),
         logger: pino({ level: 'silent' })
     });
-
-    // طلب رمز الربط برقم الهاتف إذا لم يكن الحساب مسجلاً مسبقاً
-    if (!sock.authState.creds.registered) {
-        // ضع رقم هاتفك هنا مع رمز الدولة (مثال: 249XXXXXXXXX)
-        const phoneNumber = "249114662437"; 
-        
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(phoneNumber);
-                code = code?.match(/.{1,4}/g)?.join("-") || code;
-                pairingCodeDisplay = code;
-                console.log(`\n========================================`);
-                console.log(`🔐 رمز الربط الخاص بك هو: ${code}`);
-                console.log(`========================================\n`);
-            } catch (error) {
-                console.error("فشل في طلب رمز الربط:", error);
-            }
-        }, 3000);
-    }
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -70,46 +51,55 @@ async function startBot() {
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('انقطع الاتصال، جاري إعادة المحاولة...', shouldReconnect);
+            connectionStatus = 'انقطع الاتصال، جاري إعادة المحاولة...';
             if (shouldReconnect) {
-                startBot();
+                setTimeout(startBot, 3000);
             }
         } else if (connection === 'open') {
-            pairingCodeDisplay = ''; // مسح الرمز بعد الاتصال الناجح
-            console.log('تم تسجيل الدخول بنجاح والبوت يعمل الآن!');
+            pairingCodeDisplay = '';
+            connectionStatus = 'متصل بنجاح!';
+            console.log('🎉 تم تسجيل الدخول بنجاح!');
         }
     });
 
-    // 2. حفظ كل رسالة واردة في الذاكرة المؤقتة
+    // طلب رمز الأرقام برقم الهاتف
+    if (!sock.authState.creds.registered) {
+        const phoneNumber = "249114662437"; // رقمك مع رمز الدولة بدون علامة +
+        
+        setTimeout(async () => {
+            try {
+                console.log('جاري طلب رمز الربط من واتساب...');
+                let code = await sock.requestPairingCode(phoneNumber);
+                code = code?.match(/.{1,4}/g)?.join("-") || code;
+                pairingCodeDisplay = code;
+                connectionStatus = 'جاهز في الأسفل';
+                console.log(`\n========================================`);
+                console.log(`🔐 رمز الربط هو: ${code}`);
+                console.log(`========================================\n`);
+            } catch (error) {
+                console.error("فشل في طلب رمز الربط:", error);
+                connectionStatus = 'فشل الطلب، أعد التشغيل';
+            }
+        }, 6000);
+    }
+
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message) return;
-        
         const messageId = msg.key.id;
         const chatJid = msg.key.remoteJid;
-        
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-        
         if (text) {
-            messageStore.set(messageId, {
-                chatJid: chatJid,
-                sender: msg.key.participant || chatJid,
-                text: text
-            });
+            messageStore.set(messageId, { chatJid, sender: msg.key.participant || chatJid, text });
         }
     });
 
-    // 3. مراقبة حدث حذف الرسائل
     sock.ev.on('message.delete', async (item) => {
         const deletedId = item.keys[0].id;
         const cachedMsg = messageStore.get(deletedId);
-
         if (cachedMsg) {
             const alertText = `⚠️ *تنبيه حذف رسالة!*\n👤 *من:* ${cachedMsg.sender}\n💬 *النص المحذوف:* ${cachedMsg.text}`;
-            const myJid = '249114662437@s.whatsapp.net';
-            
-            await sock.sendMessage(myJid, { text: alertText });
-            console.log('تم إرسال تنبيه الحذف بنجاح!');
+            await sock.sendMessage('249114662437@s.whatsapp.net', { text: alertText });
         }
     });
 }
