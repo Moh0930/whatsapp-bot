@@ -3,9 +3,8 @@ const pino = require('pino');
 const http = require('http');
 
 let pairingCodeDisplay = '';
-let connectionStatus = 'جاري الاتصال وتحضير البوت...';
+let connectionStatus = 'جاري الاتصال وتوليد الكود...';
 
-// سيرفر ويب لعرض الكود المكون من 8 أرقام بخط كبير جداً على المتصفح
 const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     if (pairingCodeDisplay) {
@@ -13,14 +12,14 @@ const server = http.createServer(async (req, res) => {
             <div style="text-align:center; margin-top:40px; font-family:sans-serif;">
                 <h2>رمز ربط بوت الواتساب الخاص بك:</h2>
                 <h1 style="font-size: 50px; color: #25D366; background: #f0f0f0; padding: 20px; display: inline-block; border-radius: 10px; letter-spacing: 4px;">${pairingCodeDisplay}</h1>
-                <p style="font-size: 18px; color: #333; margin-top: 15px;">انسخ هذه الأواصر واكتبها في خانة "ربط برقم الهاتف" في تطبيق الواتساب.</p>
+                <p style="font-size: 18px; color: #333; margin-top: 15px;">انسخ هذه الأرقام واكتبها في خانة "ربط برقم الهاتف" في تطبيق الواتساب.</p>
             </div>
         `);
     } else {
         res.end(`
             <div style="text-align:center; margin-top:50px; font-family:sans-serif;">
                 <h2>حالة البوت: ${connectionStatus}</h2>
-                <p>انتظر ثوانٍ معدودة، ثم قم بتحديث الصفحة (Refresh) ليظهر الرمز.</p>
+                <p>انتظر 10 ثوانٍ ثم قم بتحديث الصفحة (Refresh).</p>
             </div>
         `);
     }
@@ -34,8 +33,7 @@ server.listen(PORT, () => {
 const messageStore = new Map();
 
 async function startBot() {
-    // احرص على حذف مجلد auth_info القديم أولاً قبل تشغيل هذا الكود
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    const { state, saveCreds } = await useMultiFileAuthState('session_new');
     
     const sock = makeWASocket({
         auth: state,
@@ -62,9 +60,8 @@ async function startBot() {
         }
     });
 
-    // طلب رمز الأرقام برقم الهاتف
     if (!sock.authState.creds.registered) {
-        const phoneNumber = "249114662437"; // رقمك مع رمز الدولة بدون علامة +
+        const phoneNumber = "249114662437"; 
         
         setTimeout(async () => {
             try {
@@ -78,9 +75,9 @@ async function startBot() {
                 console.log(`========================================\n`);
             } catch (error) {
                 console.error("فشل في طلب رمز الربط:", error);
-                connectionStatus = 'فشل الطلب، أعد التشغيل';
+                connectionStatus = 'فشل الطلب، أعد تحديث الصفحة';
             }
-        }, 6000);
+        }, 5000);
     }
 
     sock.ev.on('messages.upsert', async (m) => {
